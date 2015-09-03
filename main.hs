@@ -25,24 +25,24 @@ instance Show Expr where
     show (Literal v) = show v
     show Call        = "$"
 
-readFunc :: Int -> [String] -> [String] -> [Expr]
-readFunc 0 res xss       = (Literal $ Func (readExprs $ reverse $ tail res)) : readExprs xss
-readFunc _ _ []          = error "unclosed function"
+readFunc :: Int -> [String] -> [String] -> Either String [Expr]
+readFunc 0 res xss       = (:) <$> ((Literal . Func) <$> readExprs (reverse $ tail res)) <*> readExprs xss
+readFunc _ _ []          = Left "unclosed function"
 readFunc d res ("(":xss) = readFunc (d+1) ("(":res) xss
 readFunc d res (")":xss) = readFunc (d-1) (")":res) xss
 readFunc d res (xs:xss)  = readFunc d (xs:res) xss
 
-readExprs :: [String] -> [Expr]
-readExprs []        = []
-readExprs ("#":xss) = Call : readExprs xss
+readExprs :: [String] -> Either String [Expr]
+readExprs []        = Right []
+readExprs ("#":xss) = (Call :) <$> readExprs xss
 readExprs ("(":xss) = readFunc 1 [] xss
-readExprs (")":xss) = error "unexpected }"
+readExprs (")":xss) = Left "unexpected }"
 readExprs (xs:xss) = 
     case readMaybe xs :: (Maybe Double) of
-      Just n  -> (Literal $ Number n) : readExprs xss
-      Nothing -> (Literal $ Symbol xs) : readExprs xss
+      Just n  -> ((Literal $ Number n) :) <$> readExprs xss
+      Nothing -> ((Literal $ Symbol xs) :) <$> readExprs xss
 
-parse :: String -> [Expr]
+parse :: String -> Either String [Expr]
 parse = readExprs . words . space
     where space [] = []
           space ('(':xs) = " ( " ++ space xs
@@ -50,21 +50,18 @@ parse = readExprs . words . space
           space (x:xs)   = x : space xs
 
 interpretExpr :: M.Map String Value -> [Value] -> Expr -> Interpreted
-
 interpretExpr env stk (Literal (Symbol s)) = 
     case M.lookup s env of
       Just v  -> return $ v : stk
       Nothing -> throwError $ "symbol " ++ s ++ " does not exist in this context"
-
 interpretExpr env stk (Literal val) = return $ val : stk
-
 interpretExpr env ((Func exp):stk) Call = interpret env stk exp
-
-interpretExpr env ((Prim n f):stk) Call = 
+interpretExpr env ((Prim n f):stk) Call =
     case n of
       Just n  -> ((++ drop n stk) . reverse) <$> f (reverse $ take n stk)
       Nothing -> f stk
-
+interpretExpr env (x:stk) Call = 
+    throwError $ "attempt to call uncallable value: " ++ show x
 interpretExpr env [] Call = throwError $ "attempt to call with empty stack"
 
 interpret :: M.Map String Value -> [Value] -> [Expr] -> Interpreted
@@ -98,5 +95,5 @@ defaultEnv = M.fromList $
                ]
 
 eval :: String -> IO (Either String [Value])
-eval = runExceptT . interpret defaultEnv [] . parse
+eval = either (return . Left) (runExceptT . interpret defaultEnv []) . parse
 
