@@ -2,6 +2,7 @@ import Control.Monad.Except
 import Data.Char (chr, ord)
 import qualified Data.Map as M
 import Text.Read (readMaybe)
+import System.Environment (getArgs)
 
 type Interpreted = ExceptT String IO [Value]
 
@@ -97,3 +98,8 @@ defaultEnv = M.fromList $
 eval :: String -> IO (Either String [Value])
 eval = either (return . Left) (runExceptT . interpret defaultEnv []) . parse
 
+main = do
+    args <- getArgs
+    case args of
+      [n] -> readFile n >>= eval >>= either putStrLn (\_ -> return ())
+      _   -> putStrLn "USAGE: ezm sourceFile.ezm"
